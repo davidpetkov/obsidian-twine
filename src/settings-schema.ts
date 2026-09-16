@@ -23,7 +23,13 @@ export interface TwineSettings {
 	 */
 	importedRecoveryKey: string;
 	deviceName: string;
+	/** Run periodic sync checks while Obsidian is open. */
+	automaticSyncEnabled: boolean;
 	syncIntervalSeconds: number;
+	/** Run a debounced sync after vault file events. */
+	fileChangeSyncEnabled: boolean;
+	/** Quiet period after the last file event before syncing. */
+	fileChangeDebounceSeconds: number;
 	lastSyncedAt: number | null;
 }
 
@@ -37,6 +43,9 @@ export const DEFAULT_SETTINGS: TwineSettings = {
 	passphrase: "",
 	importedRecoveryKey: "",
 	deviceName: "",
+	automaticSyncEnabled: true,
 	syncIntervalSeconds: 20,
+	fileChangeSyncEnabled: true,
+	fileChangeDebounceSeconds: 1.2,
 	lastSyncedAt: null,
 };

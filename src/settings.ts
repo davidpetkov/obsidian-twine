@@ -108,9 +108,21 @@ export class TwineSettingTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl).setName("Automatic sync").setHeading();
+
 		new Setting(containerEl)
-			.setName("Sync interval (seconds)")
-			.setDesc("How often to sync while the app is open, in addition to syncing on every file change.")
+			.setName("Sync on a schedule")
+			.setDesc("Periodically check for changes while Obsidian is open. Disable this if you prefer manual or file-change sync only.")
+			.addToggle((toggle) =>
+				toggle.setValue(settings.automaticSyncEnabled).onChange(async (value) => {
+					settings.automaticSyncEnabled = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Schedule interval (seconds)")
+			.setDesc("How often the scheduled check runs while the app is open.")
 			.addText((text) =>
 				text.setValue(String(settings.syncIntervalSeconds)).onChange(async (value) => {
 					const n = Number(value);
@@ -120,6 +132,34 @@ export class TwineSettingTab extends PluginSettingTab {
 					}
 				})
 			);
+
+		new Setting(containerEl)
+			.setName("Sync on file changes")
+			.setDesc("Start a sync after vault files are created, modified, deleted, or renamed.")
+			.addToggle((toggle) =>
+				toggle.setValue(settings.fileChangeSyncEnabled).onChange(async (value) => {
+					settings.fileChangeSyncEnabled = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("File-change debounce (seconds)")
+			.setDesc("Wait this long after the last file event before syncing. A longer delay helps when an editor/autosave produces several events.")
+			.addText((text) =>
+				text.setValue(String(settings.fileChangeDebounceSeconds)).onChange(async (value) => {
+					const n = Number(value);
+					if (Number.isFinite(n) && n >= 0.1) {
+						settings.fileChangeDebounceSeconds = n;
+						await this.plugin.saveSettings();
+					}
+				})
+			);
+
+		containerEl.createEl("p", {
+			text: "Conflict prevention: use one sync method consistently across devices, keep the same vault connected to only one file-sync system, and give each device a distinct name. If you edit the same file on two devices before either one syncs, Twine preserves both versions as a conflicted copy.",
+			cls: "setting-item-description",
+		});
 
 		new Setting(containerEl).setName("Encryption passphrase").setHeading();
 		containerEl.createEl("p", {

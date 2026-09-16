@@ -3,6 +3,12 @@ import { SyncQueue } from "../sync/queue";
 
 const FOREGROUND_INTERVAL_MS_DEFAULT = 20_000;
 
+export interface SyncTriggerSettings {
+	automaticSyncEnabled: boolean;
+	intervalMs: number;
+	fileChangeSyncEnabled: boolean;
+}
+
 /**
  * Wires every event that should trigger a sync pass to one SyncQueue. Mobile
  * has no true background execution — iOS/Android suspend or kill the WebView
@@ -16,8 +22,21 @@ export function registerSyncTriggers(
 	plugin: Plugin,
 	app: App,
 	queue: SyncQueue,
-	intervalMs: number = FOREGROUND_INTERVAL_MS_DEFAULT
-): void {
+	settings: SyncTriggerSettings = {
+		automaticSyncEnabled: true,
+		intervalMs: FOREGROUND_INTERVAL_MS_DEFAULT,
+		fileChangeSyncEnabled: true,
+	}
+): { update: (next: SyncTriggerSettings) => void } {
+	let intervalId: number | undefined;
+	const updateInterval = () => {
+		if (intervalId !== undefined) window.clearInterval(intervalId);
+		intervalId = undefined;
+		if (settings.automaticSyncEnabled) {
+			intervalId = window.setInterval(() => queue.schedule(), settings.intervalMs);
+			plugin.registerInterval(intervalId);
+		}
+	};
 	// On app open / layout ready: full pass, including a manifest rescan to
 	// catch any drift from a mobile app that was suspended (not just closed).
 	// Bypasses the debounce (triggerNow, not schedule) — this isn't a rapid-fire
@@ -26,15 +45,18 @@ export function registerSyncTriggers(
 	app.workspace.onLayoutReady(() => void queue.triggerNow());
 
 	// On vault file changes, debounced inside SyncQueue so rapid edits coalesce.
-	plugin.registerEvent(app.vault.on("create", () => queue.schedule()));
-	plugin.registerEvent(app.vault.on("modify", () => queue.schedule()));
-	plugin.registerEvent(app.vault.on("delete", () => queue.schedule()));
-	plugin.registerEvent(app.vault.on("rename", () => queue.schedule()));
+	const onFileChange = () => {
+		if (settings.fileChangeSyncEnabled) queue.schedule();
+	};
+	plugin.registerEvent(app.vault.on("create", onFileChange));
+	plugin.registerEvent(app.vault.on("modify", onFileChange));
+	plugin.registerEvent(app.vault.on("delete", onFileChange));
+	plugin.registerEvent(app.vault.on("rename", onFileChange));
 
 	// Foreground-only interval timer; cleared automatically via registerInterval
 	// on plugin unload (covers app close/reload, not backgrounding — JS execution
 	// halts while backgrounded on mobile regardless, so no extra cleanup needed there).
-	plugin.registerInterval(window.setInterval(() => queue.schedule(), intervalMs));
+	updateInterval();
 
 	// App resume from background: on desktop this fires while the process is
 	// still alive; on iOS/Android the app can also just be fully suspended and
@@ -48,4 +70,11 @@ export function registerSyncTriggers(
 	};
 	activeDocument.addEventListener("visibilitychange", onVisibilityChange);
 	plugin.register(() => activeDocument.removeEventListener("visibilitychange", onVisibilityChange));
+
+	return {
+		update: (next) => {
+			settings = next;
+			updateInterval();
+		},
+	};
 }

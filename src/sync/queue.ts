@@ -12,9 +12,13 @@ export class SyncQueue {
 	private running = false;
 
 	constructor(
-		private readonly debounceMs: number,
+		private debounceMs: number,
 		private readonly runSyncPass: () => Promise<void>
 	) {}
+
+	setDebounceMs(debounceMs: number): void {
+		this.debounceMs = debounceMs;
+	}
 
 	/** Call on any event that should eventually trigger a sync pass. */
 	schedule(): void {

@@ -13,6 +13,7 @@ import { SyncQueue } from "./src/sync/queue";
 import { runSyncPass } from "./src/sync/sync-engine";
 import { BaseContentCache, SerializedBaseCache } from "./src/sync/base-cache";
 import { registerSyncTriggers } from "./src/triggers/triggers";
+import type { SyncTriggerSettings } from "./src/triggers/triggers";
 
 interface PluginData {
 	settings: TwineSettings;
@@ -30,11 +31,13 @@ export default class TwinePlugin extends Plugin {
 	 * foreground interval — see BACKLOG.md #6. */
 	private remoteMetaCache!: RemoteMetaCache;
 	private queue?: SyncQueue;
+	private triggerController?: { update: (settings: SyncTriggerSettings) => void };
 	private baseCache?: BaseContentCache;
 	private baseCacheTarget?: string;
 	private persistedBaseCache?: SerializedBaseCache;
 	private persistedBaseCacheTarget?: string;
 	private statusBarItem?: HTMLElement;
+	private mobileSyncNotice?: Notice;
 	/** Cached to avoid re-running PBKDF2 (600k iterations, twice) on every
 	 * sync pass. Invalidated whenever the input it was derived from changes —
 	 * see getKeys(). Two sources (BACKLOG.md #9): the usual passphrase+salt
@@ -58,8 +61,8 @@ export default class TwinePlugin extends Plugin {
 			callback: () => void this.queue?.triggerNow(),
 		});
 
-		this.queue = new SyncQueue(1_200, () => this.runPass());
-		registerSyncTriggers(this, this.app, this.queue, this.settings.syncIntervalSeconds * 1000);
+		this.queue = new SyncQueue(this.settings.fileChangeDebounceSeconds * 1000, () => this.runPass());
+		this.triggerController = registerSyncTriggers(this, this.app, this.queue, this.getTriggerSettings());
 	}
 
 	onunload(): void {
@@ -68,6 +71,16 @@ export default class TwinePlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.persist();
+		this.queue?.setDebounceMs(this.settings.fileChangeDebounceSeconds * 1000);
+		this.triggerController?.update(this.getTriggerSettings());
+	}
+
+	private getTriggerSettings(): SyncTriggerSettings {
+		return {
+			automaticSyncEnabled: this.settings.automaticSyncEnabled,
+			intervalMs: this.settings.syncIntervalSeconds * 1000,
+			fileChangeSyncEnabled: this.settings.fileChangeSyncEnabled,
+		};
 	}
 
 	private async loadSettingsAndManifest(): Promise<void> {
@@ -229,10 +242,22 @@ export default class TwinePlugin extends Plugin {
 		this.statusBarItem.setText(detail ? `${label} (${detail})` : label);
 	}
 
+	private updateMobileSyncIndicator(syncing: boolean): void {
+		if (!Platform.isMobile) return;
+		if (syncing) {
+			this.mobileSyncNotice?.hide();
+			this.mobileSyncNotice = new Notice("🧵 Twine: syncing…", 0);
+		} else {
+			this.mobileSyncNotice?.hide();
+			this.mobileSyncNotice = undefined;
+		}
+	}
+
 	private async runPass(): Promise<void> {
 		if (!this.isConfigured()) return;
 
 		this.updateStatusBar("syncing");
+		this.updateMobileSyncIndicator(true);
 		try {
 			const keys = await this.getKeys();
 			const s3Config = this.getS3Config();
@@ -252,9 +277,11 @@ export default class TwinePlugin extends Plugin {
 			await this.persist();
 
 			if (result.errors.length > 0) {
+				this.updateMobileSyncIndicator(false);
 				this.updateStatusBar("error", `${result.errors.length} file(s) failed`);
 				new Notice(`Twine: ${result.errors.length} file(s) failed to sync — see console.`);
 			} else {
+				this.updateMobileSyncIndicator(false);
 				this.updateStatusBar("idle", new Date().toLocaleTimeString());
 
 				// addStatusBarItem() isn't supported on Obsidian mobile at all (desktop-only
@@ -267,6 +294,7 @@ export default class TwinePlugin extends Plugin {
 				}
 			}
 		} catch (error) {
+			this.updateMobileSyncIndicator(false);
 			this.updateStatusBar("error");
 			if (error instanceof PassphraseMismatchError) {
 				console.error("[twine] passphrase mismatch for this bucket");
